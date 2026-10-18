@@ -2,6 +2,14 @@
 
 App statica (`index.html`) + Serverless API (`/api/workouts`) + Postgres su Neon.
 
+## Anteprima
+
+| Home | Numeri | Obiettivi | Community |
+| --- | --- | --- | --- |
+| <img src="screenshots/home.png" width="200" alt="Home con totale del giorno, obiettivo e timer"> | <img src="screenshots/stats.png" width="200" alt="Statistiche, record e grafici"> | <img src="screenshots/goals.png" width="200" alt="Streak e obiettivi"> | <img src="screenshots/rank.png" width="200" alt="Classifica community"> |
+
+<img src="screenshots/sheet.png" width="200" alt="Bottom sheet per inserire una serie rapida">
+
 ## 1. Crea il database Neon
 
 1. Vai su https://neon.tech → New Project (region vicina, es. EU West).
@@ -40,15 +48,38 @@ vercel dev
 ## Struttura
 
 ```
-index.html          → frontend (fetch /api/workouts, fallback localStorage offline)
+index.html          → frontend single-file (offline-first su localStorage)
+fonts/              → Inter + Space Grotesk self-hosted (woff2, nessuna CDN a runtime)
+icon.svg            → marchio app (vettoriale)
+icon-192/512.png    → icone PWA
+apple-touch-icon.png→ icona iOS 180×180
 api/
   db.js             → client @neondatabase/serverless + validazioni
   workouts.js       → GET/POST/DELETE allenamenti
-schema.sql          → tabella workouts su Neon
+  publish.js        → upsert anonimo per la classifica
+  leaderboard.js    → top-10 + percentili
+schema.sql          → tabelle workouts + community_stats su Neon
 package.json        → dipendenza @neondatabase/serverless
 vercel.json         → runtime nodejs22.x per /api
 pushup-tracker.html → originale (solo localStorage, tenuto per riferimento)
 ```
+
+## Design system
+
+L'interfaccia è un unico file, senza framework e senza richieste esterne a runtime.
+
+- **Palette** — base grafite `#07080a`, superfici a due livelli, hairline `rgba(255,255,255,.065)`,
+  accento volt `#c8f751` per le azioni primarie e i dati chiave. Ogni variante (Larghe, Strette, Diamond)
+  ha un colore semantico usato solo per indicatori, barre e chip.
+- **Tipografia** — Space Grotesk per titoli e numeri (tabular), Inter per il testo.
+  Font self-hosted in `fonts/`, quindi il layout resta identico anche offline.
+- **Icone** — set SVG inline da 24px (`const P` in `index.html`), niente emoji nell'interfaccia.
+- **Componenti** — card a 18px di raggio, controlli a 46–54px di altezza per il touch,
+  segmented control, stepper numerico, bottom sheet per la serie rapida, barra di salvataggio sticky.
+- **Accessibilità** — focus visibile, `aria-label` sui controlli icona, contrasto testo ≥ 4.5:1,
+  rispetto di `prefers-reduced-motion`.
+- **Mobile-first** — colonna max 540px, aree sicure iOS (`safe-area-inset-*`), nessun `backdrop-filter`
+  (più fluido su dispositivi economici).
 
 ## API
 

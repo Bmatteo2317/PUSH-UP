@@ -1,5 +1,15 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#0b0f14"/>
-  <text x="256" y="348" font-size="260" text-anchor="middle" dominant-baseline="middle">💪</text>
-  <circle cx="256" cy="128" r="18" fill="#a3e635"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Push-Up Tracker">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#14181f"/>
+      <stop offset="1" stop-color="#07080a"/>
+    </linearGradient>
+    <linearGradient id="volt" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#a3e635"/>
+      <stop offset="1" stop-color="#dcff86"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="120" fill="url(#bg)"/>
+  <path d="M256 122 158 220M256 122l98 98M256 122v208" fill="none" stroke="url(#volt)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M152 384h208" fill="none" stroke="#5cc8ff" stroke-width="36" stroke-linecap="round" opacity=".9"/>
 </svg>
