@@ -945,7 +945,10 @@ function saveBar(){
 }
 /* ==================== Camera rep counter (beta, euristica locale) ==================== */
 const CAM={open:false,stream:null,raf:0,count:0,type:'wide',sensitivity:'normale',prev:null,ratio:0,moving:false,cycleStart:0,stillSince:0,lastRep:0,lastSample:0,lastVideoTime:-1,error:'',token:0,canvas:null,ctx:null,lastUi:0};
-function cameraOpen(){CAM.open=true;CAM.count=0;CAM.error='';CAM.prev=null;CAM.ratio=0;CAM.moving=false;CAM.cycleStart=0;CAM.stillSince=0;CAM.lastSample=0;CAM.lastVideoTime=-1;render();requestCamera()}
+/* Azzera frame di riferimento, ciclo e cooldown: la prima rep dopo l'avvio o il reset
+   non deve essere saltata da un timer ereditato. */
+function cameraResetCycle(){CAM.prev=null;CAM.ratio=0;CAM.moving=false;CAM.cycleStart=0;CAM.stillSince=0;CAM.lastSample=0;CAM.lastVideoTime=-1;CAM.lastRep=-CAM_TUNE.cooldownMs}
+function cameraOpen(){CAM.open=true;CAM.count=0;CAM.error='';cameraResetCycle();render();requestCamera()}
 async function requestCamera(){
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){CAM.error='Fotocamera non disponibile. Apri l’app su HTTPS o in localhost con un browser compatibile.';render();return}
   const token=++CAM.token;CAM.error='Richiesta accesso alla fotocamera…';render();
@@ -956,11 +959,11 @@ async function requestCamera(){
 }
 function cameraClose(){CAM.open=false;CAM.token++;if(CAM.raf)cancelAnimationFrame(CAM.raf);CAM.raf=0;if(CAM.stream)CAM.stream.getTracks().forEach(t=>t.stop());CAM.stream=null;CAM.prev=null;CAM.moving=false;CAM.stillSince=0;CAM.cycleStart=0;render()}
 function cameraSetType(k){if(!catOf(k))return;CAM.type=k;render()}
-function cameraSens(k){if(!CAM_SENS[k])return;CAM.sensitivity=k;CAM.moving=false;CAM.stillSince=0;CAM.cycleStart=0;render()}
-function cameraReset(){CAM.count=0;CAM.prev=null;CAM.moving=false;CAM.stillSince=0;CAM.cycleStart=0;cameraUpdateCount()}
+function cameraSens(k){if(!CAM_SENS[k])return;CAM.sensitivity=k;camSensSave();CAM.moving=false;CAM.stillSince=0;CAM.cycleStart=0;render()}
+function cameraReset(){CAM.count=0;cameraResetCycle();cameraUpdateCount()}
 function cameraUpdateCount(){const el=document.getElementById('cam-count');if(el)el.textContent=CAM.count;const btn=document.getElementById('cam-commit');if(btn)btn.disabled=CAM.count<1}
 function cameraAdjust(n){CAM.count=Math.max(0,CAM.count+n);cameraUpdateCount()}
-function cameraCommit(){if(CAM.count<1){toast('Nessuna ripetizione da aggiungere','info');return}draft[CAM.type].push(CAM.count);const n=CAM.count;CAM.count=0;CAM.prev=null;CAM.moving=false;CAM.stillSince=0;CAM.cycleStart=0;render();toast(n+' rep aggiunte alla bozza')}
+function cameraCommit(){if(CAM.count<1){toast('Nessuna ripetizione da aggiungere','info');return}draft[CAM.type].push(CAM.count);const n=CAM.count;CAM.count=0;cameraResetCycle();render();toast(n+' rep aggiunte alla bozza')}
 /* Conteggio locale per movimento (euristica, non riconoscimento della posa).
    Una rep = un ciclo di movimento: si apre sopra la soglia di ingresso e si chiude
    quando i pixel mossi restano sotto la soglia di uscita per pochi millisecondi.
@@ -975,11 +978,16 @@ function cameraCommit(){if(CAM.count<1){toast('Nessuna ripetizione da aggiungere
    - durata valida di un ciclo (movimento + quiete): 180-4000 ms;
    - cooldown tra due rep: 220 ms;
    - ritmo massimo di analisi: 40 ms (25 fps);
-   - aggiornamento barra/stato a schermo: ogni 120 ms.
+   - aggiornamento barra/stato a schermo: ogni 120 ms;
+   - la sensibilità scelta resta salvata in localStorage (pushup-tracker-camera).
    Telefono fermo e luce uniforme aiutano; il video resta nel browser. */
 const CAM_SENS={alta:{start:.012,end:.006,stillMs:100},normale:{start:.02,end:.01,stillMs:130},bassa:{start:.035,end:.018,stillMs:170}};
 const CAM_SENS_KEYS=[['alta','Alta'],['normale','Normale'],['bassa','Bassa']];
 const CAM_TUNE={w:96,h:72,delta:18,minMs:180,maxMs:4000,cooldownMs:220,sampleMs:40,uiMs:120};
+const CAM_KEY='pushup-tracker-camera';
+function camSensSaved(){try{const v=JSON.parse(localStorage.getItem(CAM_KEY)||'{}').sensitivity;return CAM_SENS[v]?v:'normale'}catch(e){return'normale'}}
+function camSensSave(){try{localStorage.setItem(CAM_KEY,JSON.stringify({sensitivity:CAM.sensitivity}))}catch(e){}}
+CAM.sensitivity=camSensSaved();
 function cameraFrame(){
   if(!CAM.open||!CAM.stream)return;
   const video=document.getElementById('cam-video');
