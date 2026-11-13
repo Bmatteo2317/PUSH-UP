@@ -944,8 +944,8 @@ function saveBar(){
   </div></div>`;
 }
 /* ==================== Camera rep counter (beta, euristica locale) ==================== */
-const CAM={open:false,stream:null,raf:0,count:0,type:'wide',prev:null,moving:false,cycleStart:0,lastRep:0,error:'',token:0,canvas:null,ctx:null,lastUi:0};
-function cameraOpen(){CAM.open=true;CAM.count=0;CAM.error='';CAM.prev=null;CAM.moving=false;CAM.cycleStart=0;render();requestCamera()}
+const CAM={open:false,stream:null,raf:0,count:0,type:'wide',sensitivity:'normale',prev:null,ratio:0,moving:false,cycleStart:0,stillSince:0,lastRep:0,lastSample:0,lastVideoTime:-1,error:'',token:0,canvas:null,ctx:null,lastUi:0};
+function cameraOpen(){CAM.open=true;CAM.count=0;CAM.error='';CAM.prev=null;CAM.ratio=0;CAM.moving=false;CAM.cycleStart=0;CAM.stillSince=0;CAM.lastSample=0;CAM.lastVideoTime=-1;render();requestCamera()}
 async function requestCamera(){
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){CAM.error='Fotocamera non disponibile. Apri l’app su HTTPS o in localhost con un browser compatibile.';render();return}
   const token=++CAM.token;CAM.error='Richiesta accesso alla fotocamera…';render();
@@ -954,41 +954,63 @@ async function requestCamera(){
     if(CAM.stream)CAM.stream.getTracks().forEach(t=>t.stop());CAM.stream=stream;CAM.error='Inquadra tutto il corpo, appoggia il telefono e inizia da fermo.';CAM.prev=null;render();
   }catch(e){CAM.error=e&&e.name==='NotAllowedError'?'Permesso negato: abilita la fotocamera nelle impostazioni del browser.':'Fotocamera non avviabile. Controlla permessi e che non sia già in uso.';render()}
 }
-function cameraClose(){CAM.open=false;CAM.token++;if(CAM.raf)cancelAnimationFrame(CAM.raf);CAM.raf=0;if(CAM.stream)CAM.stream.getTracks().forEach(t=>t.stop());CAM.stream=null;CAM.prev=null;CAM.moving=false;CAM.cycleStart=0;render()}
+function cameraClose(){CAM.open=false;CAM.token++;if(CAM.raf)cancelAnimationFrame(CAM.raf);CAM.raf=0;if(CAM.stream)CAM.stream.getTracks().forEach(t=>t.stop());CAM.stream=null;CAM.prev=null;CAM.moving=false;CAM.stillSince=0;CAM.cycleStart=0;render()}
 function cameraSetType(k){if(!catOf(k))return;CAM.type=k;render()}
+function cameraSens(k){if(!CAM_SENS[k])return;CAM.sensitivity=k;CAM.moving=false;CAM.stillSince=0;CAM.cycleStart=0;render()}
+function cameraReset(){CAM.count=0;CAM.prev=null;CAM.moving=false;CAM.stillSince=0;CAM.cycleStart=0;cameraUpdateCount()}
 function cameraUpdateCount(){const el=document.getElementById('cam-count');if(el)el.textContent=CAM.count;const btn=document.getElementById('cam-commit');if(btn)btn.disabled=CAM.count<1}
 function cameraAdjust(n){CAM.count=Math.max(0,CAM.count+n);cameraUpdateCount()}
-function cameraCommit(){if(CAM.count<1){toast('Nessuna ripetizione da aggiungere','info');return}draft[CAM.type].push(CAM.count);const n=CAM.count;CAM.count=0;CAM.prev=null;CAM.moving=false;CAM.cycleStart=0;render();toast(n+' rep aggiunte alla bozza')}
+function cameraCommit(){if(CAM.count<1){toast('Nessuna ripetizione da aggiungere','info');return}draft[CAM.type].push(CAM.count);const n=CAM.count;CAM.count=0;CAM.prev=null;CAM.moving=false;CAM.stillSince=0;CAM.cycleStart=0;render();toast(n+' rep aggiunte alla bozza')}
 /* Conteggio locale per movimento (euristica, non riconoscimento della posa).
-   Un frame di movimento apre il ciclo, il primo frame quasi fermo lo chiude e conta.
-   Nessuna pausa di stabilizzazione: due ripetizioni veloci possono contarsi di seguito.
+   Una rep = un ciclo di movimento: si apre sopra la soglia di ingresso e si chiude
+   quando i pixel mossi restano sotto la soglia di uscita per pochi millisecondi.
+   Non serve fermarsi in alto: basta un attimo di quiete tra due rep.
+   Il video della webcam e' analizzato al massimo ogni 40 ms e mai due volte sullo
+   stesso frame sorgente, cosi' i frame doppi non chiudono il ciclo in anticipo.
    Limiti usati:
-   - analisi: canvas 96x72 in scala di grigi;
-   - movimento: delta di luminosita' per pixel > 24;
-   - apertura ciclo: quota pixel mossi > 2,5%; chiusura: <= 1,5%;
-   - durata ciclo valida: 180-3500 ms (sotto e' rumore, sopra e' ciclo vecchio);
-   - cooldown tra due conteggi: 250 ms;
-   - aggiornamento stato a schermo: ogni 250 ms.
-   Serve telefono fermo e luce uniforme; il video resta nel browser. */
-const CAM_THRESH={w:96,h:72,delta:24,start:.025,end:.015,minMs:180,maxMs:3500,cooldownMs:250,uiMs:250};
+   - analisi: canvas 96x72 in scala di grigi, delta di luminosita' per pixel > 18;
+   - sensibilita' Alta: ingresso 1,2% pixel mossi, uscita 0,6%, quiete 100 ms;
+     Normale: ingresso 2,0%, uscita 1,0%, quiete 130 ms;
+     Bassa: ingresso 3,5%, uscita 1,8%, quiete 170 ms;
+   - durata valida di un ciclo (movimento + quiete): 180-4000 ms;
+   - cooldown tra due rep: 220 ms;
+   - ritmo massimo di analisi: 40 ms (25 fps);
+   - aggiornamento barra/stato a schermo: ogni 120 ms.
+   Telefono fermo e luce uniforme aiutano; il video resta nel browser. */
+const CAM_SENS={alta:{start:.012,end:.006,stillMs:100},normale:{start:.02,end:.01,stillMs:130},bassa:{start:.035,end:.018,stillMs:170}};
+const CAM_SENS_KEYS=[['alta','Alta'],['normale','Normale'],['bassa','Bassa']];
+const CAM_TUNE={w:96,h:72,delta:18,minMs:180,maxMs:4000,cooldownMs:220,sampleMs:40,uiMs:120};
 function cameraFrame(){
   if(!CAM.open||!CAM.stream)return;
   const video=document.getElementById('cam-video');
   if(!video||video.readyState<2){CAM.raf=requestAnimationFrame(cameraFrame);return}
+  const now=performance.now();
+  if(now-CAM.lastSample<CAM_TUNE.sampleMs||video.currentTime===CAM.lastVideoTime){CAM.raf=requestAnimationFrame(cameraFrame);return}
+  CAM.lastSample=now;CAM.lastVideoTime=video.currentTime;
   try{
-    if(!CAM.canvas){CAM.canvas=document.createElement('canvas');CAM.canvas.width=CAM_THRESH.w;CAM.canvas.height=CAM_THRESH.h;CAM.ctx=CAM.canvas.getContext('2d',{willReadFrequently:true})}
-    CAM.ctx.drawImage(video,0,0,CAM_THRESH.w,CAM_THRESH.h);const px=CAM.ctx.getImageData(0,0,CAM_THRESH.w,CAM_THRESH.h).data,gray=new Uint8Array(CAM_THRESH.w*CAM_THRESH.h);let moved=0;
-    for(let i=0,j=0;i<px.length;i+=4,j++){const g=(px[i]*3+px[i+1]*6+px[i+2])/10;gray[j]=g;if(CAM.prev&&Math.abs(g-CAM.prev[j])>CAM_THRESH.delta)moved++}
-    const ratio=CAM.prev?moved/gray.length:0,now=performance.now();CAM.prev=gray;
-    if(ratio>CAM_THRESH.start){
+    if(!CAM.canvas){CAM.canvas=document.createElement('canvas');CAM.canvas.width=CAM_TUNE.w;CAM.canvas.height=CAM_TUNE.h;CAM.ctx=CAM.canvas.getContext('2d',{willReadFrequently:true})}
+    CAM.ctx.drawImage(video,0,0,CAM_TUNE.w,CAM_TUNE.h);const px=CAM.ctx.getImageData(0,0,CAM_TUNE.w,CAM_TUNE.h).data,gray=new Uint8Array(CAM_TUNE.w*CAM_TUNE.h);let moved=0;
+    for(let i=0,j=0;i<px.length;i+=4,j++){const g=(px[i]*3+px[i+1]*6+px[i+2])/10;gray[j]=g;if(CAM.prev&&Math.abs(g-CAM.prev[j])>CAM_TUNE.delta)moved++}
+    const ratio=CAM.prev?moved/gray.length:0;CAM.prev=gray;CAM.ratio=ratio;
+    const P=CAM_SENS[CAM.sensitivity]||CAM_SENS.normale;
+    if(ratio>=P.start){
       if(!CAM.moving){CAM.moving=true;CAM.cycleStart=now}
-    }else if(CAM.moving&&ratio<=CAM_THRESH.end){
-      CAM.moving=false;const dur=now-CAM.cycleStart;
-      if(dur>=CAM_THRESH.minMs&&dur<=CAM_THRESH.maxMs&&now-CAM.lastRep>=CAM_THRESH.cooldownMs){
-        CAM.count++;CAM.lastRep=now;cameraUpdateCount();if(navigator.vibrate)try{navigator.vibrate(12)}catch(e){}
+      CAM.stillSince=0;
+    }else if(CAM.moving){
+      if(!CAM.stillSince)CAM.stillSince=now;
+      if(ratio<=P.end&&now-CAM.stillSince>=P.stillMs){
+        CAM.moving=false;CAM.stillSince=0;
+        const dur=now-CAM.cycleStart;
+        if(dur>=CAM_TUNE.minMs&&dur<=CAM_TUNE.maxMs&&now-CAM.lastRep>=CAM_TUNE.cooldownMs){
+          CAM.count++;CAM.lastRep=now;cameraUpdateCount();if(navigator.vibrate)try{navigator.vibrate(12)}catch(e){}
+        }
       }
     }
-    if(now-CAM.lastUi>CAM_THRESH.uiMs){const s=document.getElementById('cam-status');if(s)s.textContent=CAM.error||'Analisi locale attiva · '+Math.round(ratio*100)+'% movimento';CAM.lastUi=now}
+    if(now-CAM.lastUi>CAM_TUNE.uiMs){
+      const s=document.getElementById('cam-status');if(s)s.textContent=CAM.error||(CAM.moving?'Movimento rilevato…':'Pronto · segui il ritmo');
+      const l=document.getElementById('cam-level');if(l)l.style.width=Math.min(100,ratio/P.start*40).toFixed(0)+'%';
+      CAM.lastUi=now;
+    }
   }catch(e){CAM.error='Analisi video non riuscita. Puoi inserire le rep manualmente.'}
   CAM.raf=requestAnimationFrame(cameraFrame);
 }
@@ -996,11 +1018,13 @@ function cameraPanel(){
   if(!CAM.open)return `<section class="card tight"><div class="row sp"><div class="grow"><b style="font-size:13px">Conta le rep con la camera</b><div class="dim" style="font-size:11.5px">Beta · verifica sempre il conteggio</div></div><button class="btn ghost sm" onclick="cameraOpen()">${ic('camera','ic-sm')} Avvia</button></div></section>`;
   return `<section class="card"><div class="card-head"><h3>${ic('camera','ic-sm')} Contatore camera · beta</h3><button class="iconbtn" onclick="cameraClose()" aria-label="Chiudi fotocamera">${ic('x','ic-sm')}</button></div>
     <div class="seg accent">${T.map(t=>`<button class="${CAM.type===t[0]?'on':''}" onclick="cameraSetType('${t[0]}')">${t[1]}</button>`).join('')}</div>
+    <div class="seg" style="margin-top:6px" aria-label="Sensibilita' del rilevamento">${CAM_SENS_KEYS.map(([k,n])=>`<button class="${CAM.sensitivity===k?'on':''}" onclick="cameraSens('${k}')">${n}</button>`).join('')}</div>
     <div class="cam-video">${CAM.stream?'<video id="cam-video" autoplay muted playsinline></video>':'<div style="height:180px;display:grid;place-items:center;color:var(--tx-3);font-size:13px;padding:20px;text-align:center">'+ic('camera','ic-lg')+'<br>Fotocamera non attiva</div>'}<div class="cam-readout"><span id="cam-status">${esc(CAM.error||'Avvio fotocamera…')}</span><span><b id="cam-count">${CAM.count}</b> rep</span></div></div>
     ${!CAM.stream?`<button class="btn ghost block" style="margin-top:9px" onclick="requestCamera()">${ic('refresh','ic-sm')} Riprova</button>`:''}
+    <div class="track thin" style="margin-top:10px" title="Movimento rilevato"><i id="cam-level" style="width:0%"></i></div>
     <div class="cam-controls"><span class="muted" style="font-size:12px">Correggi il totale</span><span class="stepper"><button onclick="cameraAdjust(-1)" aria-label="Togli una ripetizione">${ic('minus','ic-sm')}</button><button onclick="cameraAdjust(1)" aria-label="Aggiungi una ripetizione">${ic('plus','ic-sm')}</button></span></div>
-    <div class="cam-actions"><button class="btn primary" id="cam-commit" onclick="cameraCommit()" ${CAM.count<1?'disabled':''}>${ic('check','ic-sm')} Aggiungi serie</button><button class="btn ghost" onclick="CAM.count=0;CAM.prev=null;cameraUpdateCount()">${ic('reset','ic-sm')} Azzera</button></div>
-    <p class="cam-note">Rilevamento euristico del movimento, non riconoscimento della posa: telefono fermo, luce uniforme e corpo intero nell’inquadratura aiutano. Può contare male o non rilevare; video elaborato solo nel browser, nessun invio. Controlla e correggi prima di salvare.</p></section>`;
+    <div class="cam-actions"><button class="btn primary" id="cam-commit" onclick="cameraCommit()" ${CAM.count<1?'disabled':''}>${ic('check','ic-sm')} Aggiungi serie</button><button class="btn ghost" onclick="cameraReset()">${ic('reset','ic-sm')} Azzera</button></div>
+    <p class="cam-note">Rilevamento euristico del movimento, non riconoscimento della posa: telefono fermo, luce uniforme e corpo intero nell’inquadratura aiutano. Se perde rep alza la sensibilità ad Alta, se conta troppo abbassala. Video elaborato solo nel browser, nessun invio: controlla e correggi prima di salvare.</p></section>`;
 }
 
 function dash(){
